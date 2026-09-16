@@ -24,7 +24,8 @@ android {
   }
 
   // No es necesario crear una keystore
-  /*signingConfigs {
+  /*
+  signingConfigs {
     create("release") {
       val keystorePath = System.getenv("KEYSTORE_PATH") ?: "${rootDir}/my-upload-key.jks"
       storeFile = file(keystorePath)
