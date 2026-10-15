@@ -87,13 +87,8 @@ CasaColinaApp/
                 │   │   ├── Theme.kt
                 │   │   └── Type.kt
                 │   │
-                │   ├── navigation/
-                │   │   ├── NavItem.kt
-                │   │   └── AppNavigation.kt
-                │   │
                 │   ├── components/
-                │   │   ├── TopBar.kt
-                │   │   └── BottomNavigationBar.kt
+                │   │   └── CasaColinaComponents.kt
                 │   │
                 │   └── screens/
                 │       ├── HomeScreen.kt
@@ -104,14 +99,16 @@ CasaColinaApp/
                 │       ├── ReservationsScreen.kt
                 │       └── ProfileScreen.kt
                 │
-                └── data/
-                    ├── model/
-                    │   ├── Dish.kt
-                    │   ├── Reservation.kt
-                    │   └── CartItem.kt
-                    │
-                    └── repository/
-                        └── MockData.kt
+                ├── data/
+                │   ├── SampleData.kt
+                │
+                ├── model/
+                │   ├── Models.kt
+                │
+                └── viewmodel/
+                    ├── RestaurantViewModel.kt
+
+
 ```
 
 La estructura anterior corresponde a la organización del proyecto proporcionada para **CasaColinaApp**.
