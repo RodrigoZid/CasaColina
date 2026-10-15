@@ -1,5 +1,11 @@
 package com.example.ui.screens
 
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.ui.graphics.vector.ImageVector
+
+// CasaColina - HomeScreen alineado con datos recibidos desde ViewModel.
+// Conserva diseño original. El ViewModel debe proporcionar menú, usuario y reserva.
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -56,6 +62,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.example.data.SampleData
+import com.example.model.ReservationState
+import java.util.Locale
+import java.util.Calendar
+import java.text.SimpleDateFormat
 import com.example.model.Dish
 import com.example.model.MenuCategory
 import com.example.model.Screen
@@ -82,8 +92,25 @@ fun HomeScreen(
     onSelectDish: (Dish) -> Unit,
     onQuickAdd: (Dish) -> Unit,
     onOpenQr: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    userName: String = "Invitado",
+    chefDishes: List<Dish> = emptyList(),
+    nextReservation: ReservationState? = null,
+    nextReservationDate: String? = null,
+    isMenuLoading: Boolean = false,
+    menuError: String? = null,
+    onRetryMenu: () -> Unit = {},
+    onCallRestaurant: () -> Unit = {},
+    onOpenDirections: () -> Unit = {}
 ) {
+    val currentDate = SimpleDateFormat("EEEE, d 'de' MMMM", Locale("es", "PE"))
+        .format(Calendar.getInstance().time)
+        .replaceFirstChar { it.uppercase() }
+    val greeting = when (Calendar.getInstance().get(Calendar.HOUR_OF_DAY)) {
+        in 5..11 -> "Buenos días"
+        in 12..18 -> "Buenas tardes"
+        else -> "Buenas noches"
+    }
     LazyColumn(
         modifier = modifier
             .fillMaxSize()
@@ -104,13 +131,15 @@ fun HomeScreen(
                 ) {
                     Column {
                         Text(
-                            text = "Jueves, 24 de Octubre",
-                            style = MaterialTheme.typography.labelMedium,
+                            text = currentDate,
+                            fontSize = 12.sp,
                             color = CriolloOnSurfaceVariant
                         )
                         Text(
-                            text = "Buenas tardes, Rodrigo",
-                            style = MaterialTheme.typography.headlineMedium,
+                            text = "$greeting, ${userName.substringBefore(" ").ifBlank { "Invitado" }}",
+                            fontSize = 21.sp,
+                            lineHeight = 25.sp,
+                            fontFamily = FontFamily.Serif,
                             color = CriolloPrimary,
                             fontWeight = FontWeight.Bold
                         )
@@ -132,7 +161,7 @@ fun HomeScreen(
                         )
                         Text(
                             text = "Socio Gourmet",
-                            style = MaterialTheme.typography.labelSmall,
+                            fontSize = 10.sp,
                             color = CriolloOnSecondaryFixed,
                             fontWeight = FontWeight.Bold
                         )
@@ -141,8 +170,8 @@ fun HomeScreen(
 
                 Spacer(modifier = Modifier.height(14.dp))
 
-                // Card Próxima Reserva
-                Card(
+                // Card Próxima Reserva: solo se muestra con datos confirmados
+                if (nextReservation != null) Card(
                     shape = RoundedCornerShape(14.dp),
                     colors = CardDefaults.cardColors(containerColor = CriolloSurfaceContainerLowest),
                     border = CardDefaults.outlinedCardBorder().copy(brush = Brush.linearGradient(listOf(CriolloOutlineVariant.copy(alpha = 0.5f), CriolloOutlineVariant.copy(alpha = 0.2f)))),
@@ -192,14 +221,14 @@ fun HomeScreen(
                                             .background(CriolloTertiary, CircleShape)
                                     )
                                     Text(
-                                        text = "Hoy 8:30 PM",
+                                        text = nextReservationDate ?: "Fecha pendiente",
                                         fontSize = 11.sp,
                                         color = CriolloTertiary,
                                         fontWeight = FontWeight.SemiBold
                                     )
                                 }
                                 Text(
-                                    text = "Mesa para 4 • Patio Virreinal",
+                                    text = "Mesa para ${nextReservation.guests} • ${nextReservation.ambiance}",
                                     style = MaterialTheme.typography.titleMedium,
                                     fontWeight = FontWeight.SemiBold,
                                     color = CriolloOnSurface,
@@ -233,7 +262,7 @@ fun HomeScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp, vertical = 6.dp)
-                    .height(250.dp)
+                    .height(260.dp)
                     .clip(RoundedCornerShape(16.dp))
             ) {
                 AsyncImage(
@@ -276,18 +305,19 @@ fun HomeScreen(
 
                     Text(
                         text = "Sabores con historia,\ntradición con estilo",
-                        style = MaterialTheme.typography.headlineLarge,
+                        fontSize = 27.sp,
                         fontFamily = FontFamily.Serif,
                         color = Color.White,
                         fontWeight = FontWeight.Bold,
-                        lineHeight = 32.sp
+                        lineHeight = 30.sp
                     )
 
                     Spacer(modifier = Modifier.height(4.dp))
 
                     Text(
                         text = "Una experiencia gastronómica criolla única en el corazón de la ciudad.",
-                        style = MaterialTheme.typography.bodySmall,
+                        fontSize = 12.sp,
+                        lineHeight = 16.sp,
                         color = Color.White.copy(alpha = 0.85f),
                         maxLines = 2
                     )
@@ -382,14 +412,15 @@ fun HomeScreen(
                     Column {
                         Text(
                             text = "RECOMENDACIÓN DE TEMPORADA",
-                            style = MaterialTheme.typography.labelSmall,
+                            fontSize = 10.sp,
                             color = CriolloPrimary,
                             fontWeight = FontWeight.Bold,
                             letterSpacing = 0.6.sp
                         )
                         Text(
                             text = "Selección del Chef",
-                            style = MaterialTheme.typography.headlineSmall,
+                            fontSize = 20.sp,
+                            lineHeight = 24.sp,
                             fontFamily = FontFamily.Serif,
                             fontWeight = FontWeight.Bold,
                             color = CriolloOnSurface
@@ -414,14 +445,24 @@ fun HomeScreen(
 
                 Spacer(modifier = Modifier.height(10.dp))
 
-                // Cards de Selección del Chef
-                SampleData.DISHES.filter { it.isChefPick }.forEach { dish ->
-                    ChefDishCard(
-                        dish = dish,
-                        onDetailClick = { onSelectDish(dish) },
-                        onAddClick = { onQuickAdd(dish) },
-                        modifier = Modifier.padding(bottom = 12.dp)
-                    )
+                // Recomendaciones reales de DynamoDB: una o varias, sin valores fijos.
+                val recomendados = chefDishes.filter { it.isChefPick && it.available }
+                if (isMenuLoading) {
+                    CircularProgressIndicator(color = CriolloPrimary)
+                } else if (menuError != null) {
+                    Text("No se pudieron cargar los platos: $menuError", color = CriolloOnSurfaceVariant)
+                    TextButton(onClick = onRetryMenu) { Text("Reintentar", color = CriolloPrimary) }
+                } else if (recomendados.isEmpty()) {
+                    Text("No hay recomendaciones del chef disponibles.", color = CriolloOnSurfaceVariant)
+                } else {
+                    recomendados.forEach { dish ->
+                        ChefDishCard(
+                            dish = dish,
+                            onDetailClick = { onSelectDish(dish) },
+                            onAddClick = { onQuickAdd(dish) },
+                            modifier = Modifier.padding(bottom = 12.dp)
+                        )
+                    }
                 }
             }
         }
@@ -508,7 +549,7 @@ fun HomeScreen(
 
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     Button(
-                        onClick = {},
+                        onClick = onCallRestaurant,
                         colors = ButtonDefaults.buttonColors(
                             containerColor = CriolloSurfaceContainerLow,
                             contentColor = CriolloPrimary
@@ -523,7 +564,7 @@ fun HomeScreen(
                     }
 
                     Button(
-                        onClick = {},
+                        onClick = onOpenDirections,
                         colors = ButtonDefaults.buttonColors(
                             containerColor = CriolloSurfaceContainerLow,
                             contentColor = CriolloPrimary
@@ -544,7 +585,7 @@ fun HomeScreen(
 
 @Composable
 fun QuickActionButton(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    icon: ImageVector,
     label: String,
     bgColor: Color,
     iconColor: Color,
@@ -593,112 +634,113 @@ fun ChefDishCard(
     Card(
         shape = RoundedCornerShape(14.dp),
         colors = CardDefaults.cardColors(containerColor = CriolloSurfaceContainerLowest),
-        border = CardDefaults.outlinedCardBorder().copy(brush = Brush.linearGradient(listOf(CriolloOutlineVariant.copy(alpha = 0.4f), CriolloOutlineVariant.copy(alpha = 0.4f)))),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+        border = CardDefaults.outlinedCardBorder().copy(
+            brush = Brush.linearGradient(
+                listOf(CriolloOutlineVariant.copy(alpha = 0.4f), CriolloOutlineVariant.copy(alpha = 0.4f))
+            )
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
         modifier = modifier.fillMaxWidth()
     ) {
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(12.dp),
-            verticalAlignment = Alignment.CenterVertically
+            modifier = Modifier.fillMaxWidth().padding(10.dp),
+            verticalAlignment = Alignment.Top,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            // Thumbnail with optional badge
             Box(
                 modifier = Modifier
-                    .size(96.dp)
+                    .size(110.dp)
                     .clip(RoundedCornerShape(10.dp))
+                    .background(CriolloSurfaceContainer)
                     .clickable(onClick = onDetailClick)
             ) {
                 AsyncImage(
-                    model = dish.imageUrl,
+                    model = dish.imageUrl.trim().takeIf { it.isNotEmpty() },
                     contentDescription = dish.name,
                     contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize()
-                )
-                dish.badge?.let { badgeText ->
-                    Box(
-                        modifier = Modifier
-                            .align(Alignment.TopStart)
-                            .padding(4.dp)
-                            .background(
-                                if (badgeText == "Top #1") CriolloPrimary else CriolloTertiary,
-                                RoundedCornerShape(4.dp)
-                            )
-                            .padding(horizontal = 6.dp, vertical = 2.dp)
-                    ) {
-                        Text(
-                            text = badgeText,
-                            color = Color.White,
-                            fontSize = 9.sp,
-                            fontWeight = FontWeight.Bold
+                    modifier = Modifier.fillMaxSize(),
+                    onError = { result ->
+                        android.util.Log.e(
+                            "CASACOLINA_IMAGEN",
+                            "No se pudo cargar ${dish.name}: ${dish.imageUrl}",
+                            result.result.throwable
                         )
                     }
+                )
+                dish.badge?.takeIf { it.isNotBlank() }?.let { badge ->
+                    Text(
+                        text = badge,
+                        color = Color.White,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.align(Alignment.TopStart)
+                            .padding(5.dp)
+                            .background(CriolloPrimary, RoundedCornerShape(4.dp))
+                            .padding(horizontal = 6.dp, vertical = 3.dp)
+                    )
                 }
             }
-
-            Spacer(modifier = Modifier.width(12.dp))
 
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = dish.name,
-                    style = MaterialTheme.typography.titleMedium,
+                    fontSize = 16.sp,
+                    lineHeight = 19.sp,
                     fontFamily = FontFamily.Serif,
                     fontWeight = FontWeight.Bold,
                     color = CriolloOnSurface,
-                    maxLines = 1,
+                    maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.clickable(onClick = onDetailClick)
                 )
-
+                Spacer(modifier = Modifier.height(3.dp))
                 Text(
                     text = dish.shortDescription,
-                    style = MaterialTheme.typography.bodySmall,
+                    fontSize = 12.sp,
+                    lineHeight = 16.sp,
                     color = CriolloOnSurfaceVariant,
                     maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(top = 2.dp)
+                    overflow = TextOverflow.Ellipsis
                 )
-
-                Spacer(modifier = Modifier.height(8.dp))
-
+                Spacer(modifier = Modifier.height(7.dp))
+                Text(
+                    text = "S/ ${"%.2f".format(dish.price)}",
+                    fontSize = 16.sp,
+                    lineHeight = 19.sp,
+                    color = CriolloPrimary,
+                    fontWeight = FontWeight.Bold
+                )
+                Spacer(modifier = Modifier.height(7.dp))
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
+                    horizontalArrangement = Arrangement.End,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text = "S/ ${"%.2f".format(dish.price)}",
-                        style = MaterialTheme.typography.titleMedium,
-                        color = CriolloPrimary,
-                        fontWeight = FontWeight.Bold
-                    )
-
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        OutlinedButton(
-                            onClick = onDetailClick,
-                            shape = RoundedCornerShape(6.dp),
-                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                            border = ButtonDefaults.outlinedButtonBorder.copy(brush = Brush.linearGradient(listOf(CriolloPrimary, CriolloPrimary))),
-                            modifier = Modifier.height(30.dp)
-                        ) {
-                            Text("Ver detalle", fontSize = 11.sp, color = CriolloPrimary, fontWeight = FontWeight.Bold)
-                        }
-
-                        IconButton(
-                            onClick = onAddClick,
-                            modifier = Modifier
-                                .size(30.dp)
-                                .background(CriolloPrimary, RoundedCornerShape(6.dp))
-                                .testTag("quick_add_${dish.id}")
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Add,
-                                contentDescription = "Añadir al carrito",
-                                tint = CriolloOnPrimary,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
+                    OutlinedButton(
+                        onClick = onDetailClick,
+                        shape = RoundedCornerShape(6.dp),
+                        contentPadding = PaddingValues(horizontal = 9.dp, vertical = 0.dp),
+                        border = ButtonDefaults.outlinedButtonBorder.copy(
+                            brush = Brush.linearGradient(listOf(CriolloPrimary, CriolloPrimary))
+                        ),
+                        modifier = Modifier.height(36.dp)
+                    ) {
+                        Text("Ver detalle", fontSize = 11.sp, color = CriolloPrimary)
+                    }
+                    Spacer(modifier = Modifier.width(6.dp))
+                    IconButton(
+                        onClick = onAddClick,
+                        enabled = dish.available,
+                        modifier = Modifier.size(36.dp)
+                            .background(CriolloPrimary, RoundedCornerShape(6.dp))
+                            .testTag("quick_add_${dish.id}")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Add,
+                            contentDescription = "Añadir al carrito",
+                            tint = CriolloOnPrimary,
+                            modifier = Modifier.size(18.dp)
+                        )
                     }
                 }
             }

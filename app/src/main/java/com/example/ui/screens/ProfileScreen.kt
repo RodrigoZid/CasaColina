@@ -6,8 +6,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -60,7 +58,6 @@ import com.example.ui.theme.CriolloSurfaceContainerLowest
 import com.example.ui.theme.CriolloTertiary
 
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun ProfileScreen(
 
@@ -77,14 +74,18 @@ fun ProfileScreen(
     onActionClicked: (String) -> Unit,
     onLogout: () -> Unit,
 
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    userName: String = "",
+    userEmail: String = "",
+    memberSince: String = "",
+    membershipLevel: String = "",
+    hasConfirmedReservation: Boolean = false,
+    isOrdersLoading: Boolean = false,
+    ordersError: String? = null,
+    isProfileLoading: Boolean = false,
+    profileError: String? = null
 ) {
 
-    val preferences = listOf(
-        "Picante moderado",
-        "Sin mariscos crudos",
-        "Mesa cerca a terraza"
-    )
 
 
     LazyColumn(
@@ -162,7 +163,7 @@ fun ProfileScreen(
                                     SampleData.PROFILE_AVATAR_URL,
 
                                 contentDescription =
-                                    "Rodrigo Torres",
+                                    "Foto de perfil",
 
                                 contentScale =
                                     ContentScale.Crop,
@@ -176,7 +177,7 @@ fun ProfileScreen(
                         Column {
 
                             Text(
-                                text = "Rodrigo Torres",
+                                text = userName.ifBlank { "Mi perfil" },
 
                                 style =
                                     MaterialTheme.typography.titleLarge,
@@ -194,7 +195,7 @@ fun ProfileScreen(
 
                             Text(
                                 text =
-                                    "Socio Gourmet Nivel Oro",
+                                    membershipLevel.ifBlank { "Cliente CasaColina" },
 
                                 fontSize = 12.sp,
 
@@ -208,7 +209,7 @@ fun ProfileScreen(
 
                             Text(
                                 text =
-                                    "Miembro desde Octubre 2021",
+                                    if (memberSince.isNotBlank()) "Miembro desde $memberSince" else userEmail,
 
                                 fontSize = 10.sp,
 
@@ -335,10 +336,30 @@ fun ProfileScreen(
 
 
         // =====================================================
+        // ESTADO DE PERFIL (DATOS DESDE AWS)
+        // =====================================================
+
+        if (isProfileLoading || !profileError.isNullOrBlank()) {
+            item {
+                Text(
+                    text = if (isProfileLoading) "Cargando perfil..." else "No se pudo cargar el perfil: $profileError",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = CriolloOnSurfaceVariant
+                )
+            }
+        }
+
+        // =====================================================
         // PASE DIGITAL DE RESERVA
         // =====================================================
 
-        item {
+        // Mostrar el pase solo si AWS confirmó una reserva identificable y vigente.
+        // El estado y el ID provienen de CasaColina_Reservas mediante el ViewModel.
+        if (
+            hasConfirmedReservation &&
+            reservation.reservationId.isNotBlank() &&
+            reservation.status.trim().uppercase() !in setOf("CANCELADA", "CANCELADO", "CANCELLED", "RECHAZADA", "RECHAZADO")
+        ) item {
 
             Card(
 
@@ -441,7 +462,7 @@ fun ProfileScreen(
 
                             Text(
                                 text =
-                                    "Confirmada",
+                                    if (reservation.status.trim().uppercase() in setOf("CONFIRMADA", "CONFIRMADO", "CONFIRMED")) "Confirmada" else "Pendiente de confirmación",
 
                                 fontSize = 11.sp,
 
@@ -475,10 +496,7 @@ fun ProfileScreen(
                                 RoundedCornerShape(10.dp)
                             )
 
-                            .clickable(
-                                onClick =
-                                    onOpenQr
-                            )
+                            .clickable(onClick = onOpenQr)
 
                             .padding(12.dp),
 
@@ -497,7 +515,7 @@ fun ProfileScreen(
                         Box(
 
                             modifier = Modifier
-                                .size(56.dp)
+                                .size(80.dp)
 
                                 .background(
                                     Color.White,
@@ -524,13 +542,13 @@ fun ProfileScreen(
                                     Icons.Default.QrCode2,
 
                                 contentDescription =
-                                    "Pase QR",
+                                    "Ver código QR de la reserva",
 
                                 tint =
                                     CriolloPrimary,
 
                                 modifier =
-                                    Modifier.size(42.dp)
+                                    Modifier.size(62.dp)
                             )
                         }
 
@@ -628,139 +646,24 @@ fun ProfileScreen(
                             Text(
 
                                 text =
-                                    "Toca el código QR para ampliar",
+                                    if (reservation.status.trim().uppercase() in setOf("CONFIRMADA", "CONFIRMADO", "CONFIRMED"))
+                                        "TOCA AQUÍ PARA VER TU CÓDIGO QR"
+                                    else
+                                        "TOCA AQUÍ PARA AMPLIAR EL QR (RESERVA PENDIENTE)",
 
-                                fontSize = 10.sp,
+                                fontSize = 13.sp,
 
                                 color =
                                     CriolloPrimary,
 
                                 fontWeight =
-                                    FontWeight.SemiBold,
+                                    FontWeight.Bold,
 
                                 modifier =
                                     Modifier.padding(
                                         top = 2.dp
                                     )
                             )
-                        }
-                    }
-                }
-            }
-        }
-
-
-        // =====================================================
-        // PREFERENCIAS
-        // =====================================================
-
-        item {
-
-            Card(
-
-                shape =
-                    RoundedCornerShape(14.dp),
-
-                colors =
-                    CardDefaults.cardColors(
-
-                        containerColor =
-                            CriolloSurfaceContainerLowest
-                    ),
-
-                border =
-                    CardDefaults
-                        .outlinedCardBorder()
-                        .copy(
-
-                            brush =
-                                Brush.linearGradient(
-
-                                    listOf(
-
-                                        CriolloOutlineVariant.copy(
-                                            alpha = 0.4f
-                                        ),
-
-                                        CriolloOutlineVariant.copy(
-                                            alpha = 0.4f
-                                        )
-                                    )
-                                )
-                        ),
-
-                modifier =
-                    Modifier.fillMaxWidth()
-            ) {
-
-                Column(
-
-                    modifier =
-                        Modifier.padding(14.dp)
-                ) {
-
-
-                    Text(
-                        text =
-                            "Preferencias Registradas",
-
-                        style =
-                            MaterialTheme.typography.titleSmall,
-
-                        fontWeight =
-                            FontWeight.Bold,
-
-                        color =
-                            CriolloOnSurface
-                    )
-
-
-                    Spacer(
-                        modifier =
-                            Modifier.height(8.dp)
-                    )
-
-
-                    FlowRow(
-
-                        horizontalArrangement =
-                            Arrangement.spacedBy(8.dp),
-
-                        verticalArrangement =
-                            Arrangement.spacedBy(6.dp)
-                    ) {
-
-                        preferences.forEach { pref ->
-
-                            Box(
-
-                                modifier = Modifier
-
-                                    .background(
-
-                                        CriolloSurfaceContainer,
-
-                                        RoundedCornerShape(16.dp)
-                                    )
-
-                                    .padding(
-                                        horizontal = 10.dp,
-                                        vertical = 5.dp
-                                    )
-                            ) {
-
-                                Text(
-                                    text = pref,
-
-                                    fontSize = 11.sp,
-
-                                    color =
-                                        CriolloOnSurfaceVariant,
-
-                                    fontWeight =
-                                        FontWeight.Medium
-                                )
-                            }
                         }
                     }
                 }
@@ -841,7 +744,19 @@ fun ProfileScreen(
                     // SI TODAVÍA NO HAY PEDIDOS
                     // =============================================
 
-                    if (orderHistory.isEmpty()) {
+                    if (isOrdersLoading) {
+                        Text(
+                            text = "Cargando pedidos...",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = CriolloOnSurfaceVariant
+                        )
+                    } else if (!ordersError.isNullOrBlank()) {
+                        Text(
+                            text = "No se pudieron cargar los pedidos: $ordersError",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = CriolloOnSurfaceVariant
+                        )
+                    } else if (orderHistory.isEmpty()) {
 
                         Text(
 
@@ -1055,7 +970,7 @@ fun ProfileScreen(
                         .clickable {
 
                             onActionClicked(
-                                "Abriendo métodos de pago guardados"
+                                "Los métodos de pago son de demostración; no se almacenan tarjetas bancarias"
                             )
                         }
                 ) {
@@ -1179,7 +1094,7 @@ fun ProfileScreen(
 
                             onActionClicked(
 
-                                "Abriendo soporte VIP de WhatsApp Casa Colina"
+                                "Soporte de reservas: canal pendiente de configuración"
                             )
                         }
                 ) {

@@ -1,5 +1,5 @@
-package com.example.model
 
+package com.example.model
 
 // ============================================================
 // PANTALLAS DE LA APLICACIÓN
@@ -15,7 +15,6 @@ enum class Screen {
     PROFILE
 }
 
-
 // ============================================================
 // CATEGORÍAS DEL MENÚ
 // ============================================================
@@ -23,75 +22,70 @@ enum class Screen {
 enum class MenuCategory(
     val displayName: String
 ) {
-
     ALL("Todos"),
-
     ENTRADAS("Entradas"),
-
     FONDOS("Fondos Criollos"),
-
     CAVA("De la Cava"),
+    POSTRES("Postres");
 
-    POSTRES("Postres")
+    companion object {
+
+        fun fromBackend(value: String): MenuCategory {
+            val normalized = value.trim().lowercase()
+
+            return when (normalized) {
+                "entradas", "entrada" -> ENTRADAS
+
+                "fondos", "fondo",
+                "fondos criollos" -> FONDOS
+
+                "cava", "de la cava",
+                "bebidas" -> CAVA
+
+                "postres", "postre" -> POSTRES
+
+                else -> ALL
+            }
+        }
+    }
 }
 
-
 // ============================================================
-// PLATO
+// PLATO DEL MENÚ
 // ============================================================
 
 data class Dish(
-
     val id: String,
-
     val name: String,
-
     val category: MenuCategory,
-
     val price: Double,
-
     val prepTime: String,
-
     val shortDescription: String,
-
     val fullDescription: String,
-
     val imageUrl: String,
-
     val badge: String? = null,
-
     val isChefPick: Boolean = false,
-
-    val rating: Double = 4.9,
-
-    val reviewsCount: Int = 340
+    val rating: Double = 0.0,
+    val reviewsCount: Int = 0,
+    val available: Boolean = true
 )
-
 
 // ============================================================
 // ELEMENTO DEL CARRITO
 // ============================================================
 
 data class CartItem(
-
     val id: String,
-
     val dish: Dish,
-
-    val doneness: String = "Término Medio",
-
+    val doneness: String = "",
     val extras: List<String> = emptyList(),
-
     val quantity: Int = 1,
-
-    val unitPrice: Double
-
+    val unitPrice: Double,
+    val createdAt: String = ""
 ) {
-
     val totalPrice: Double
         get() = unitPrice * quantity
 }
-
 
 // ============================================================
 // ESTADO DE RESERVA
@@ -100,70 +94,80 @@ data class CartItem(
 data class ReservationState(
 
     // Ambiente seleccionado
-    val ambiance: String =
-        "Patio Virreinal",
+    val ambiance: String = "",
 
-    // Día seleccionado
-    val dateDay: String =
-        "24",
+    // Valores para mostrar la fecha en pantalla
+    val dateDay: String = "",
+    val dateMonth: String = "",
 
-    // Mes / indicador mostrado
-    val dateMonth: String =
-        "Jue",
-
-    // Indica si la reserva es para hoy
-    val isToday: Boolean =
-        true,
+    // Indica si corresponde a la fecha actual
+    val isToday: Boolean = false,
 
     // Hora seleccionada
-    val timeSlot: String =
-        "20:30 PM",
+    val timeSlot: String = "",
 
     // Número de personas
-    val guests: Int =
-        4,
+    val guests: Int = 1,
 
-    // Motivo de visita
-    val occasions: Set<String> =
-        setOf("Cena Casual ✨")
+    // Motivos de visita
+    val occasions: Set<String> = emptySet(),
+
+    // Identificador de la reserva en DynamoDB
+    val reservationId: String = "",
+
+    // Fecha completa en formato YYYY-MM-DD
+    val dateIso: String = "",
+
+    // Hora en formato HH:mm
+    val time24h: String = "",
+
+    // Observaciones adicionales
+    val observations: String = "",
+
+    // Estado devuelto por Lambda
+    val status: String = "",
+
+    // Fechas de registro y modificación
+    val createdAt: String = "",
+    val updatedAt: String = ""
 )
-
 
 // ============================================================
 // HISTORIAL DE PEDIDOS
 // ============================================================
-//
-// Este modelo guarda los pedidos realizados desde el carrito.
-//
-// Se utilizará posteriormente en ProfileScreen para mostrar:
-//
-// - Platos comprados
-// - Fecha
-// - Modalidad
-// - Método de pago
-// - Total pagado
-//
-// ============================================================
 
 data class OrderHistory(
 
-    // Identificador único
+    // Identificador del pedido
     val id: String,
 
-    // Ejemplo:
-    // "Lomo Saltado + Ceviche Clásico"
+    // Descripción de los productos
     val description: String,
 
-    // Ejemplo:
-    // "Hoy"
+    // Fecha del pedido
     val date: String,
 
-    // Delivery Express / Para Llevar
+    // Modalidad de entrega
     val deliveryMode: String,
 
-    // Tarjeta / Yape / Contra Entrega
+    // Método de pago
     val paymentMethod: String,
 
-    // Total pagado
-    val total: Double
+    // Importe total
+    val total: Double,
+
+    // Estado del pedido
+    val status: String = "",
+
+    // Estado del pago
+    val paymentStatus: String = "",
+
+    // Dirección de entrega
+    val deliveryAddress: String = "",
+
+    // Identificador del usuario
+    val userId: String = "",
+
+    // Fecha completa del registro
+    val createdAt: String = ""
 )

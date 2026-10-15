@@ -1,3 +1,4 @@
+
 package com.example.ui.screens
 
 import androidx.compose.foundation.background
@@ -26,12 +27,14 @@ import androidx.compose.material.icons.filled.TableRestaurant
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -60,6 +63,9 @@ import com.example.ui.theme.CriolloPrimary
 import com.example.ui.theme.CriolloPrimaryContainer
 import com.example.ui.theme.CriolloSurfaceContainer
 import com.example.ui.theme.CriolloSurfaceContainerLowest
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -73,7 +79,11 @@ fun ReservationScreen(
     onToggleOccasion: (String) -> Unit,
     onConfirm: () -> Unit,
     onReservationCompleted: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    isSubmitting: Boolean = false,
+    reservationSaved: Boolean = false,
+    reservationError: String? = null,
+    onSelectIsoDate: (String) -> Unit = {}
 ) {
 
     // =========================================================
@@ -100,20 +110,53 @@ fun ReservationScreen(
         mutableStateOf(false)
     }
 
+    // Mostrar confirmación únicamente cuando la capa de datos confirme el guardado.
+    val isConfirmed = reservationSaved &&
+            reservation.reservationId.isNotBlank() &&
+            reservation.status.equals("confirmada", ignoreCase = true)
+    LaunchedEffect(reservationSaved, reservation.reservationId, reservation.status) {
+        if (reservationSaved && reservation.reservationId.isNotBlank()) showConfirmationDialog = true
+    }
+
 
     // =========================================================
     // DATOS FRONTEND
     // =========================================================
 
-    val dateOptions = listOf(
-        Triple("24", "Oct", true),
-        Triple("25", "Oct", false),
-        Triple("26", "Oct", false),
-        Triple("27", "Oct", false),
-        Triple("28", "Oct", false),
-        Triple("29", "Oct", false),
-        Triple("30", "Oct", false)
-    )
+    // Próximos siete días, calculados según el calendario del dispositivo.
+    val today = LocalDate.now()
+    val monthFormatter = DateTimeFormatter.ofPattern("MMM", Locale("es", "PE"))
+    val weekdayFormatter = DateTimeFormatter.ofPattern("EEE", Locale("es", "PE"))
+    val upcomingDates = (0L..6L).map { today.plusDays(it) }
+    val isoFormatter = DateTimeFormatter.ISO_LOCAL_DATE
+    val dateOptions = upcomingDates.mapIndexed { index, date ->
+        Triple(date.dayOfMonth.toString(), date.format(monthFormatter), index == 0)
+    }
+    // Sincronizar la fecha predeterminada si el estado conserva una fecha antigua.
+    LaunchedEffect(today, reservation.dateDay, reservation.dateMonth) {
+        val validDate = dateOptions.any { (day, month, _) ->
+            day == reservation.dateDay && month.equals(reservation.dateMonth, ignoreCase = true)
+        }
+        if (!validDate) {
+            val first = dateOptions.first()
+            selectedDay = first.first
+            selectedMonth = first.second
+            selectedIsToday = true
+            onSelectDate(first.first, first.second, true)
+            onSelectIsoDate(upcomingDates.first().format(isoFormatter))
+        }
+    }
+
+
+    LaunchedEffect(reservation.dateIso) {
+        if (reservation.dateIso.isBlank()) {
+            val selected = upcomingDates.firstOrNull { date ->
+                date.dayOfMonth.toString() == selectedDay &&
+                        date.format(monthFormatter).equals(selectedMonth, ignoreCase = true)
+            } ?: today
+            onSelectIsoDate(selected.format(isoFormatter))
+        }
+    }
 
     val timeSlots = listOf(
         "13:00",
@@ -246,7 +289,7 @@ fun ReservationScreen(
             Column {
 
                 Text(
-                    text = "2. Selecciona Fecha (Octubre)",
+                    text = "2. Selecciona Fecha",
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
                     color = CriolloOnSurface
@@ -264,7 +307,7 @@ fun ReservationScreen(
                             dateOptions[index]
 
                         val isSelected =
-                            selectedDay == day
+                            selectedDay == day && selectedMonth.equals(month, ignoreCase = true)
 
                         Card(
                             shape = RoundedCornerShape(12.dp),
@@ -294,6 +337,7 @@ fun ReservationScreen(
                                         month,
                                         isToday
                                     )
+                                    onSelectIsoDate(upcomingDates[index].format(isoFormatter))
                                 }
                         ) {
 
@@ -341,11 +385,7 @@ fun ReservationScreen(
 
                                 Text(
                                     text =
-                                        if (isToday) {
-                                            "Jue"
-                                        } else {
-                                            "Oct"
-                                        },
+                                        upcomingDates[index].format(weekdayFormatter).uppercase(),
 
                                     fontSize = 10.sp,
 
@@ -716,11 +756,11 @@ fun ReservationScreen(
                 Button(
                     onClick = {
 
-                        // Primero mostramos el diálogo.
-                        // Todavía NO navegamos.
-                        showConfirmationDialog = true
+                        // Solicitar registro a la capa de datos. No declarar éxito aún.
+                        onConfirm()
                     },
 
+                    enabled = !isSubmitting && !reservationSaved && reservation.guests in 1..12 && selectedTime.isNotBlank(),
                     shape =
                         RoundedCornerShape(10.dp),
 
@@ -758,7 +798,7 @@ fun ReservationScreen(
 
                     Text(
                         text =
-                            "Confirmar Reserva Inmediata",
+                            if (isSubmitting) "Registrando reserva..." else "Confirmar Reserva Inmediata",
 
                         style =
                             MaterialTheme.typography.titleSmall,
@@ -772,10 +812,26 @@ fun ReservationScreen(
                 }
 
 
+                if (isSubmitting) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.align(Alignment.CenterHorizontally).padding(top = 8.dp).size(24.dp),
+                        color = CriolloPrimary,
+                        strokeWidth = 2.dp
+                    )
+                }
+
+                if (!reservationError.isNullOrBlank()) {
+                    Text(
+                        text = reservationError,
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(top = 8.dp)
+                    )
+                }
+
                 Text(
                     text =
-                        "No cobramos depósito previo. " +
-                                "Cancelación gratuita con 2h de anticipación.",
+                        "La disponibilidad y las condiciones de cancelación se confirmarán con el restaurante.",
 
                     style =
                         MaterialTheme.typography.bodySmall,
@@ -800,7 +856,7 @@ fun ReservationScreen(
     // VENTANA RESERVA CONFIRMADA
     // =========================================================
 
-    if (showConfirmationDialog) {
+    if (showConfirmationDialog && reservationSaved && reservation.reservationId.isNotBlank()) {
 
         AlertDialog(
 
@@ -827,7 +883,7 @@ fun ReservationScreen(
             title = {
 
                 Text(
-                    text = "¡Reserva confirmada!",
+                    text = if (isConfirmed) "¡Reserva confirmada!" else "¡Reserva registrada!",
                     fontWeight = FontWeight.Bold,
                     fontFamily = FontFamily.Serif,
                     color = CriolloPrimary
@@ -843,7 +899,7 @@ fun ReservationScreen(
 
                     Text(
                         text =
-                            "Tu reserva ha sido registrada correctamente.",
+                            "Tu reserva ha sido registrada correctamente. Estado: ${reservation.status.ifBlank { "Pendiente de confirmación" }}.",
 
                         color =
                             CriolloOnSurface
@@ -968,11 +1024,20 @@ fun ReservationScreen(
                     )
 
 
+                    // CÓDIGO DE RESERVA GENERADO POR AWS
+                    Text(
+                        text = "Código: ${reservation.reservationId}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = CriolloOnSurfaceVariant
+                    )
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
                     // CORREO
 
                     Text(
                         text =
-                            "La confirmación fue enviada a tu correo registrado.",
+                            "Reserva registrada en el sistema.",
 
                         style =
                             MaterialTheme.typography.bodyMedium,
@@ -1017,10 +1082,8 @@ fun ReservationScreen(
                         // 1. Cerramos la ventana
                         showConfirmationDialog = false
 
-                        // 2. Confirmamos la reserva
-                        onConfirm()
-
-                        // 3. Navegamos al perfil
+                        // El registro ya fue confirmado por la capa de datos.
+                        // Navegamos al perfil sin repetir la solicitud.
                         onReservationCompleted()
                     },
 

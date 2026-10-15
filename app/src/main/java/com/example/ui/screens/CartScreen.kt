@@ -81,9 +81,9 @@ fun CartScreen(
 ) {
 
     val subtotal = cartItems.sumOf { it.totalPrice }
-    val tax = subtotal * 0.18
+    val tax = subtotal - (subtotal / 1.18)
 
-    // Controla la ventana de pago completado
+    // Ventana de confirmación del flujo de pago de demostración
     var showPaymentSuccess by remember {
         mutableStateOf(false)
     }
@@ -855,8 +855,9 @@ fun CartScreen(
                     Button(
                         onClick = {
 
-                            // Solo mostramos la confirmación.
-                            // Todavía NO cambiamos de pantalla.
+                            // Demostración: no se realiza ningún cobro bancario.
+                            // La persistencia del pedido depende de onCheckout,
+                            // que se conectará al backend desde el ViewModel.
                             showPaymentSuccess = true
                         },
                         shape = RoundedCornerShape(10.dp),
@@ -883,7 +884,7 @@ fun CartScreen(
                         )
 
                         Text(
-                            text = "Confirmar Pedido y Pagar",
+                            text = "Confirmar pedido (demo)",
                             style =
                                 MaterialTheme.typography.titleSmall,
                             fontWeight = FontWeight.Bold,
@@ -896,7 +897,7 @@ fun CartScreen(
 
 
         // =========================================================
-        // POPUP PAGO COMPLETADO
+        // POPUP DE SIMULACIÓN DE PAGO / PEDIDO
         // =========================================================
 
         if (showPaymentSuccess) {
@@ -913,7 +914,7 @@ fun CartScreen(
                         imageVector =
                             Icons.Default.CheckCircle,
                         contentDescription =
-                            "Pago completado",
+                            "Confirmación de demostración",
                         tint = CriolloPrimary,
                         modifier = Modifier.size(56.dp)
                     )
@@ -922,7 +923,10 @@ fun CartScreen(
                 title = {
 
                     Text(
-                        text = "¡Pago completado!",
+                        text = if (paymentMethod == "Pago Contra Entrega (POS móvil)")
+                            "Pedido pendiente de pago"
+                        else
+                            "Confirmar pedido (demo)",
                         fontFamily = FontFamily.Serif,
                         fontWeight = FontWeight.Bold,
                         color = CriolloOnSurface
@@ -939,7 +943,10 @@ fun CartScreen(
 
                         Text(
                             text =
-                                "Tu pago se realizó correctamente.",
+                                if (paymentMethod == "Pago Contra Entrega (POS móvil)")
+                                    "El pago se realizará al recibir el pedido."
+                                else
+                                    "No se efectuará ningún cobro real. Al confirmar, se intentará registrar el pedido en AWS.",
                             color =
                                 CriolloOnSurfaceVariant
                         )
@@ -980,7 +987,7 @@ fun CartScreen(
 
                         Text(
                             text =
-                                "Tu pedido ha sido confirmado.",
+                                "Confirma para continuar con el registro del pedido.",
                             fontWeight = FontWeight.Bold,
                             color = CriolloOnSurface
                         )
@@ -991,7 +998,7 @@ fun CartScreen(
 
                         Text(
                             text =
-                                "Enviamos los detalles de tu pedido a tu correo registrado.",
+                                "Modo demostración. El registro en AWS y el envío de correo requieren confirmación del servidor.",
                             fontSize = 12.sp,
                             color =
                                 CriolloOnSurfaceVariant
@@ -1004,14 +1011,16 @@ fun CartScreen(
                     Button(
                         onClick = {
 
-                            // 1. Cerramos el popup
+                            // 1. Cerramos la simulación
                             showPaymentSuccess = false
 
-                            // 2. Procesamos pedido
+                            // 2. Ejecutamos el flujo actual del pedido.
+                            // IMPORTANTE: onCheckout no devuelve éxito/error;
+                            // la confirmación real de AWS queda pendiente.
                             onCheckout()
 
-                            // 3. Navegamos al perfil
-                            onPaymentCompleted()
+                            // La navegación ocurre únicamente cuando AWS confirma el pedido.
+                            // MainActivity observa checkoutConfirmed en RestaurantViewModel.
                         },
                         colors =
                             ButtonDefaults.buttonColors(

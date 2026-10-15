@@ -1,6 +1,17 @@
 package com.example.viewmodel
 
-import androidx.lifecycle.ViewModel
+import android.app.Application
+import androidx.lifecycle.AndroidViewModel
+import com.example.data.local.SessionManager
+import com.example.data.repository.UsuarioRepository
+import com.example.data.repository.CarritoRepository
+import com.example.data.repository.PedidoRepository
+import com.example.data.repository.ReservaRepository
+import com.example.data.remote.dto.ItemPedidoDto
+import androidx.lifecycle.viewModelScope
+import com.example.data.repository.MenuRepository
+import com.example.data.remote.api.PlatoDto
+import kotlinx.coroutines.launch
 import com.example.data.SampleData
 import com.example.model.CartItem
 import com.example.model.Dish
@@ -28,8 +39,20 @@ data class UiState(
     val selectedCategory: MenuCategory = MenuCategory.ALL,
     val searchQuery: String = "",
 
+    // Datos recibidos de AWS API Gateway / DynamoDB
+    val remoteMenu: List<PlatoDto> = emptyList(),
+    val isMenuLoading: Boolean = false,
+    val menuError: String? = null,
+
     // Plato seleccionado
-    val selectedDish: Dish = SampleData.DISHES[0],
+    val selectedDish: Dish = SampleData.DISHES.first(),
+    val dishes: List<Dish> = emptyList(),
+    val userName: String = "",
+    val userEmail: String = "",
+    val isCheckoutLoading: Boolean = false,
+    val checkoutConfirmed: Boolean = false,
+    val isReservationLoading: Boolean = false,
+    val hasConfirmedReservation: Boolean = false,
 
     val detailDoneness: String =
         "Término medio (Recomendado)",
@@ -44,29 +67,10 @@ data class UiState(
     // CARRITO
     // ========================================================
 
-    val cartItems: List<CartItem> = listOf(
-
-        CartItem(
-            id = "cart-1",
-            dish = SampleData.DISHES[0],
-            doneness = "Término medio",
-            extras = emptyList(),
-            quantity = 1,
-            unitPrice = 68.00
-        ),
-
-        CartItem(
-            id = "cart-2",
-            dish = SampleData.DISHES[2],
-            doneness = "Pesca del día",
-            extras = emptyList(),
-            quantity = 1,
-            unitPrice = 58.00
-        )
-    ),
+    val cartItems: List<CartItem> = emptyList(),
 
 
-    // ========================================================
+    // ======================================================================================================
     // CONFIGURACIÓN DEL PEDIDO
     // ========================================================
 
@@ -102,9 +106,9 @@ data class UiState(
     val isDrawerOpen: Boolean = false,
 
     val favorites: Set<String> =
-        setOf("lomo"),
+        emptySet(),
 
-    val userPoints: Int = 2850,
+    val userPoints: Int = 0,
 
     val snackbarMessage: String? = null
 )
@@ -114,11 +118,171 @@ data class UiState(
 // VIEWMODEL
 // ============================================================
 
-class RestaurantViewModel : ViewModel() {
+class RestaurantViewModel(application: Application) : AndroidViewModel(application) {
+
+    private val sessionManager = SessionManager(application.applicationContext)
+    private val menuRepository = MenuRepository()
+    private val usuarioRepository = UsuarioRepository(sessionManager = sessionManager)
+    private val carritoRepository = CarritoRepository(sessionManager = sessionManager)
+    private val pedidoRepository = PedidoRepository(sessionManager = sessionManager)
+    private val reservaRepository = ReservaRepository(sessionManager = sessionManager)
+
+    private fun PlatoDto.toDish(): Dish = Dish(
+        id = platoId,
+        name = nombre,
+        category = MenuCategory.fromBackend(categoria),
+        price = precio,
+        prepTime = tiempoPreparacion.toString(),
+        shortDescription = descripcionCorta ?: descripcion.orEmpty(),
+        fullDescription = descripcionCompleta ?: descripcion.orEmpty(),
+        imageUrl = imagenUrl.orEmpty(),
+        isChefPick = destacadoChef,
+        rating = calificacion ?: 0.0,
+        reviewsCount = 0,
+        available = disponible
+    )
+
+    // Convierte respuestas JSON sin asumir que todos los endpoints
+    // devuelven exactamente la misma envoltura.
+    private fun Map<String, Any>.text(key: String): String = this[key]?.toString().orEmpty()
+
+    fun cargarPerfilDesdeAws() {
+        viewModelScope.launch {
+            usuarioRepository.obtenerPerfil()
+                .onSuccess { data ->
+                    val usuario = (data["usuario"] as? Map<*, *>) ?: data
+
+                    val puntos = usuario["puntos"]
+                        ?.toString()
+                        ?.toDoubleOrNull()
+                        ?.toInt() ?: 0
+
+                    _uiState.update {
+                        it.copy(
+                            userName = usuario["nombre"]?.toString().orEmpty(),
+                            userEmail = (
+                                    usuario["correo"] ?: usuario["email"]
+                                    )?.toString().orEmpty(),
+                            userPoints = puntos
+                        )
+                    }
+                }
+                .onFailure { error ->
+                    _uiState.update {
+                        it.copy(
+                            snackbarMessage = error.message
+                                ?: "No se pudo cargar el perfil"
+                        )
+                    }
+                }
+        }
+    }
+    fun cargarPedidosDesdeAws() {
+        viewModelScope.launch {
+            pedidoRepository.obtenerPedidos().onSuccess { body ->
+                val raw = (body["pedidos"] ?: body["items"]) as? List<*> ?: emptyList<Any>()
+                val orders = raw.mapNotNull { entry ->
+                    val obj = entry as? Map<*, *> ?: return@mapNotNull null
+                    val id = obj["pedidoId"]?.toString().orEmpty()
+                    if (id.isBlank()) return@mapNotNull null
+                    val productos = (obj["items"] as? List<*>)?.joinToString(" + ") { item ->
+                        val m = item as? Map<*, *>
+                        (m?.get("nombre") ?: m?.get("platoId"))?.toString().orEmpty()
+                    }.orEmpty()
+                    OrderHistory(
+                        id = id,
+                        description = productos,
+                        date = obj["fechaCreacion"]?.toString().orEmpty(),
+                        deliveryMode = obj["modalidadEntrega"]?.toString().orEmpty(),
+                        paymentMethod = obj["metodoPago"]?.toString().orEmpty(),
+                        total = (obj["total"] as? Number)?.toDouble() ?: 0.0,
+                        status = obj["estado"]?.toString().orEmpty(),
+                        paymentStatus = obj["estadoPago"]?.toString().orEmpty(),
+                        deliveryAddress = obj["direccionEntrega"]?.toString().orEmpty(),
+                        userId = obj["usuarioId"]?.toString().orEmpty(),
+                        createdAt = obj["fechaCreacion"]?.toString().orEmpty()
+                    )
+                }
+                val puntosPedidos = raw.sumOf { entry ->
+                    val obj = entry as? Map<*, *>
+                    (obj?.get("puntosGanados") as? Number)?.toInt() ?: 0
+                }
+                _uiState.update { it.copy(
+                    orderHistory = orders,
+                    userPoints = maxOf(it.userPoints, puntosPedidos)
+                ) }
+            }.onFailure { error ->
+                _uiState.update { it.copy(snackbarMessage = error.message ?: "No se pudieron cargar los pedidos") }
+            }
+        }
+    }
+
+    fun cargarCarritoDesdeAws() {
+        viewModelScope.launch {
+            carritoRepository.obtenerCarrito().onSuccess { body ->
+                val raw = (body["items"] ?: body["carrito"]) as? List<*> ?: emptyList<Any>()
+                val dishes = _uiState.value.dishes
+                val items = raw.mapNotNull { entry ->
+                    val obj = entry as? Map<*, *> ?: return@mapNotNull null
+                    val platoId = obj["platoId"]?.toString().orEmpty()
+                    val dish = dishes.firstOrNull { it.id == platoId } ?: return@mapNotNull null
+                    val qty = (obj["cantidad"] as? Number)?.toInt() ?: 1
+                    CartItem(
+                        id = (obj["itemId"] ?: obj["carritoId"] ?: platoId).toString(),
+                        dish = dish,
+                        quantity = qty,
+                        unitPrice = (obj["precioUnitario"] as? Number)?.toDouble() ?: dish.price,
+                        createdAt = obj["fechaCreacion"]?.toString().orEmpty()
+                    )
+                }
+                _uiState.update { it.copy(cartItems = items) }
+            }.onFailure { error ->
+                _uiState.update { it.copy(snackbarMessage = error.message ?: "No se pudo cargar el carrito") }
+            }
+        }
+    }
+
+
+    // Consulta GET /menu. No sustituye los Dish de la UI hasta
+    // verificar el modelo Dish y la estructura de MenuScreen.
+    fun cargarMenuDesdeAws(categoria: String? = null) {
+        viewModelScope.launch {
+            _uiState.update {
+                it.copy(isMenuLoading = true, menuError = null)
+            }
+            val resultado = menuRepository.obtenerMenu(categoria)
+            resultado.fold(
+                onSuccess = { platos ->
+                    _uiState.update {
+                        it.copy(
+                            remoteMenu = platos,
+                            dishes = platos.filter { it.disponible }.map { it.toDish() },
+                            isMenuLoading = false,
+                            menuError = null
+                        )
+                    }
+                    if (sessionManager.tieneUsuario()) cargarCarritoDesdeAws()
+                },
+                onFailure = { error ->
+                    _uiState.update {
+                        it.copy(
+                            isMenuLoading = false,
+                            menuError = error.message ?: "Error al consultar el menú"
+                        )
+                    }
+                }
+            )
+        }
+    }
+
 
 
     private val _uiState =
         MutableStateFlow(UiState())
+
+    init {
+        cargarMenuDesdeAws()
+    }
 
 
     val uiState: StateFlow<UiState> =
@@ -321,231 +485,48 @@ class RestaurantViewModel : ViewModel() {
     // ========================================================
 
     fun addDetailDishToCart() {
+        val state = _uiState.value
+        agregarProductoRemoto(state.selectedDish, state.detailQuantity)
+    }
 
-        val current =
-            _uiState.value
+    fun quickAddToCart(dish: Dish) {
+        agregarProductoRemoto(dish, 1)
+    }
 
-
-        val dish =
-            current.selectedDish
-
-
-        val extrasSum =
-            current
-                .detailExtras
-                .values
-                .sum()
-
-
-        val unitPrice =
-            dish.price +
-                    extrasSum
-
-
-        val extraNames =
-            current
-                .detailExtras
-                .keys
-                .toList()
-
-
-        val newItem =
-            CartItem(
-
-                id =
-                    "cart-${System.currentTimeMillis()}",
-
-                dish =
-                    dish,
-
-                doneness =
-                    current.detailDoneness,
-
-                extras =
-                    extraNames,
-
-                quantity =
-                    current.detailQuantity,
-
-                unitPrice =
-                    unitPrice
-            )
-
-
-        _uiState.update {
-
-            it.copy(
-
-                cartItems =
-                    it.cartItems +
-                            newItem,
-
-                currentScreen =
-                    Screen.CART,
-
-                snackbarMessage =
-                    "¡${dish.name} agregado a tu orden!"
-            )
+    private fun agregarProductoRemoto(dish: Dish, cantidad: Int) {
+        if (dish.id.isBlank() || !dish.available) {
+            _uiState.update { it.copy(snackbarMessage = "Plato no disponible") }
+            return
+        }
+        viewModelScope.launch {
+            carritoRepository.agregarProducto(dish.id, cantidad)
+                .onSuccess {
+                    _uiState.update { it.copy(currentScreen = Screen.CART, snackbarMessage = "¡Producto agregado al carrito!") }
+                    cargarCarritoDesdeAws()
+                }.onFailure { error ->
+                    _uiState.update { it.copy(snackbarMessage = "No se agregó al carrito: ${error.message}") }
+                }
         }
     }
 
-
-    // ========================================================
-    // AGREGAR RÁPIDAMENTE AL CARRITO
-    // ========================================================
-
-    fun quickAddToCart(
-        dish: Dish
-    ) {
-
-        _uiState.update { current ->
-
-            val existingIndex =
-                current.cartItems.indexOfFirst {
-
-                    it.dish.id ==
-                            dish.id &&
-
-                            it.extras.isEmpty()
-                }
-
-
-            val updatedList =
-
-                if (
-                    existingIndex != -1
-                ) {
-
-                    current.cartItems.mapIndexed {
-                            index,
-                            item ->
-
-                        if (
-                            index ==
-                            existingIndex
-                        ) {
-
-                            item.copy(
-                                quantity =
-                                    item.quantity + 1
-                            )
-
-                        } else {
-
-                            item
-                        }
-                    }
-
-                } else {
-
-                    current.cartItems +
-
-                            CartItem(
-
-                                id =
-                                    "cart-${System.currentTimeMillis()}",
-
-                                dish =
-                                    dish,
-
-                                doneness =
-                                    "Receta criolla de la casa",
-
-                                extras =
-                                    emptyList(),
-
-                                quantity =
-                                    1,
-
-                                unitPrice =
-                                    dish.price
-                            )
-                }
-
-
-            current.copy(
-
-                cartItems =
-                    updatedList,
-
-                snackbarMessage =
-                    "¡${dish.name} agregado al carrito!"
-            )
+    fun updateCartItemQuantity(itemId: String, delta: Int) {
+        val item = _uiState.value.cartItems.firstOrNull { it.id == itemId } ?: return
+        val nuevaCantidad = item.quantity + delta
+        viewModelScope.launch {
+            val result = if (nuevaCantidad <= 0) carritoRepository.eliminarProducto(itemId)
+            else carritoRepository.actualizarCantidad(itemId, nuevaCantidad)
+            result.onSuccess { cargarCarritoDesdeAws() }
+                .onFailure { error -> _uiState.update { it.copy(snackbarMessage = "No se actualizó el carrito: ${error.message}") } }
         }
     }
-
-
-    // ========================================================
-    // MODIFICAR CANTIDAD DEL CARRITO
-    // ========================================================
-
-    fun updateCartItemQuantity(
-        itemId: String,
-        delta: Int
-    ) {
-
-        _uiState.update { current ->
-
-            val updated =
-                current.cartItems.mapNotNull {
-                        item ->
-
-
-                    if (
-                        item.id ==
-                        itemId
-                    ) {
-
-                        val newQty =
-                            item.quantity +
-                                    delta
-
-
-                        if (
-                            newQty > 0
-                        ) {
-
-                            item.copy(
-                                quantity =
-                                    newQty
-                            )
-
-                        } else {
-
-                            null
-                        }
-
-                    } else {
-
-                        item
-                    }
-                }
-
-
-            current.copy(
-                cartItems =
-                    updated
-            )
-        }
-    }
-
-
-    // ========================================================
-    // VACIAR CARRITO
-    // ========================================================
 
     fun clearCart() {
-
-        _uiState.update {
-
-            it.copy(
-
-                cartItems =
-                    emptyList(),
-
-                snackbarMessage =
-                    "Carrito vaciado"
-            )
+        viewModelScope.launch {
+            carritoRepository.vaciarCarrito().onSuccess {
+                _uiState.update { it.copy(cartItems = emptyList(), snackbarMessage = "Carrito vaciado correctamente") }
+            }.onFailure { error ->
+                _uiState.update { it.copy(snackbarMessage = "No se pudo vaciar el carrito: ${error.message}") }
+            }
         }
     }
 
@@ -590,119 +571,70 @@ class RestaurantViewModel : ViewModel() {
     // PROCESAR PAGO
     // ========================================================
 
+    fun consumeCheckoutConfirmation() {
+        _uiState.update { it.copy(checkoutConfirmed = false) }
+    }
+
     fun processCheckout() {
-
-        val current =
-            _uiState.value
-
-
-        // ----------------------------------------------------
-        // VALIDAR CARRITO
-        // ----------------------------------------------------
-
-        if (
-            current.cartItems.isEmpty()
-        ) {
-
-            _uiState.update {
-
-                it.copy(
-                    snackbarMessage =
-                        "El carrito está vacío"
-                )
-            }
-
+        val current = _uiState.value
+        if (current.isCheckoutLoading) return
+        if (current.cartItems.isEmpty()) {
+            _uiState.update { it.copy(snackbarMessage = "El carrito está vacío") }
             return
         }
-
-
-        // ----------------------------------------------------
-        // CONSTRUIR DESCRIPCIÓN DEL PEDIDO
-        // ----------------------------------------------------
-
-        val description =
-            current.cartItems.joinToString(
-                separator = " + "
-            ) { item ->
-
-                if (
-                    item.quantity > 1
-                ) {
-
-                    "${item.dish.name} x${item.quantity}"
-
-                } else {
-
-                    item.dish.name
+        _uiState.update { it.copy(isCheckoutLoading = true, checkoutConfirmed = false, snackbarMessage = null) }
+        viewModelScope.launch {
+            val items = current.cartItems.map {
+                ItemPedidoDto(platoId = it.dish.id, cantidad = it.quantity, precioUnitario = it.unitPrice)
+            }
+            // La interfaz conserva sus etiquetas; AWS recibe los valores permitidos.
+            val modalidadAws = when (current.deliveryMode) {
+                "Delivery Express", "Delivery" -> "Delivery"
+                "Para Llevar", "Recojo en local" -> "Recojo en local"
+                else -> {
+                    _uiState.update { it.copy(isCheckoutLoading = false, snackbarMessage = "Modalidad de entrega no válida") }
+                    return@launch
                 }
             }
-
-
-        // ----------------------------------------------------
-        // CALCULAR TOTAL
-        // ----------------------------------------------------
-
-        val total =
-            current.cartItems.sumOf {
-
-                it.totalPrice
+            val metodoPagoAws = when (current.paymentMethod) {
+                "Tarjeta Débito / Crédito", "Tarjeta" -> "Tarjeta"
+                "Billeteras Digitales (Yape / Plin)", "Yape" -> "Yape"
+                "Plin" -> "Plin"
+                "Pago Contra Entrega (POS móvil)", "Efectivo" -> "Efectivo"
+                else -> {
+                    _uiState.update { it.copy(isCheckoutLoading = false, snackbarMessage = "Método de pago no válido") }
+                    return@launch
+                }
             }
-
-
-        // ----------------------------------------------------
-        // CREAR PEDIDO PARA HISTORIAL
-        // ----------------------------------------------------
-
-        val newOrder =
-            OrderHistory(
-
-                id =
-                    "order-${System.currentTimeMillis()}",
-
-                description =
-                    description,
-
-                date =
-                    "Hoy",
-
-                deliveryMode =
-                    current.deliveryMode,
-
-                paymentMethod =
-                    current.paymentMethod,
-
-                total =
-                    total
-            )
-
-
-        // ----------------------------------------------------
-        // GUARDAR PEDIDO
-        // ----------------------------------------------------
-
-        _uiState.update {
-
-            it.copy(
-
-                // Guardar el pedido nuevo primero
-                orderHistory =
-                    listOf(newOrder) +
-                            it.orderHistory,
-
-                // Vaciar carrito después de guardar
-                cartItems =
-                    emptyList(),
-
-                // Sumar puntos
-                userPoints =
-                    it.userPoints + 150,
-
-                // No cambiamos todavía a PROFILE.
-                // MainActivity puede hacerlo cuando el
-                // usuario presione OK en la ventana de pago.
-                snackbarMessage =
-                    "¡Pago completado! Pedido registrado correctamente."
-            )
+            pedidoRepository.crearPedido(items, modalidadAws, metodoPagoAws)
+                .onSuccess { body ->
+                    val pedido = body["pedido"] as? Map<*, *> ?: body
+                    val id = (pedido["pedidoId"] ?: body["pedidoId"])?.toString().orEmpty()
+                    if (id.isBlank()) {
+                        _uiState.update { it.copy(isCheckoutLoading = false, snackbarMessage = "No se pudo confirmar el pedido. Verifica tu historial antes de reintentar") }
+                    } else {
+                        val description = current.cartItems.joinToString(" + ") { "${it.dish.name} x${it.quantity}" }
+                        val order = OrderHistory(
+                            id = id, description = description,
+                            date = pedido["fechaCreacion"]?.toString().orEmpty(),
+                            deliveryMode = current.deliveryMode,
+                            paymentMethod = current.paymentMethod,
+                            total = (pedido["total"] as? Number)?.toDouble() ?: current.cartItems.sumOf { it.totalPrice },
+                            status = pedido["estado"]?.toString().orEmpty(),
+                            paymentStatus = pedido["estadoPago"]?.toString().orEmpty()
+                        )
+                        _uiState.update { it.copy(
+                            orderHistory = listOf(order) + it.orderHistory,
+                            cartItems = emptyList(), isCheckoutLoading = false, checkoutConfirmed = true,
+                            snackbarMessage = "¡Pedido registrado correctamente!"
+                        ) }
+                        carritoRepository.vaciarCarrito().onFailure { error ->
+                            _uiState.update { it.copy(snackbarMessage = "Pedido registrado; no se pudo vaciar el carrito remoto: ${error.message}") }
+                        }
+                    }
+                }.onFailure { error ->
+                    _uiState.update { it.copy(isCheckoutLoading = false, snackbarMessage = "No se registró el pedido: ${error.message}") }
+                }
         }
     }
 
@@ -757,6 +689,10 @@ class RestaurantViewModel : ViewModel() {
     }
 
 
+    fun selectReservationFullDate(dateIso: String) {
+        _uiState.update { it.copy(reservation = it.reservation.copy(dateIso = dateIso)) }
+    }
+
     fun selectReservationTime(
         time: String
     ) {
@@ -769,7 +705,8 @@ class RestaurantViewModel : ViewModel() {
                     it.reservation.copy(
 
                         timeSlot =
-                            time
+                            time,
+                        time24h = if (Regex("^([01]\\d|2[0-3]):[0-5]\\d$").matches(time)) time else it.reservation.time24h
                     )
             )
         }
@@ -790,7 +727,7 @@ class RestaurantViewModel : ViewModel() {
                                 delta
                         ).coerceIn(
                         1,
-                        20
+                        12
                     )
 
 
@@ -860,25 +797,44 @@ class RestaurantViewModel : ViewModel() {
     // ========================================================
 
     fun confirmReservation() {
-
-        val res =
-            _uiState
-                .value
-                .reservation
-
-
-        _uiState.update {
-
-            it.copy(
-
-                // La navegación a PROFILE puede realizarse
-                // cuando el usuario cierre el diálogo.
-
-                snackbarMessage =
-                    "¡Reserva confirmada para " +
-                            "${res.guests} personas en " +
-                            "${res.ambiance}!"
-            )
+        val res = _uiState.value.reservation
+        if (_uiState.value.isReservationLoading) return
+        if (res.dateIso.isBlank() || res.time24h.isBlank()) {
+            _uiState.update { it.copy(snackbarMessage = "Selecciona una fecha y hora completas antes de reservar") }
+            return
+        }
+        _uiState.update { it.copy(isReservationLoading = true, snackbarMessage = null) }
+        viewModelScope.launch {
+            reservaRepository.consultarDisponibilidad(res.dateIso, res.time24h, res.guests)
+                .onSuccess { availability ->
+                    // No inferir disponibilidad de una respuesta sin el campo explícito.
+                    if (availability["disponibleReferencial"] != true) {
+                        _uiState.update { it.copy(isReservationLoading = false, snackbarMessage = "No se pudo confirmar la disponibilidad") }
+                        return@onSuccess
+                    }
+                    reservaRepository.crearReserva(
+                        fecha = res.dateIso, hora = res.time24h,
+                        personas = res.guests, ambiente = res.ambiance,
+                        observaciones = res.observations.ifBlank { res.occasions.joinToString(", ") }
+                    ).onSuccess { body ->
+                        val reserva = body["reserva"] as? Map<*, *> ?: body
+                        val id = (reserva["reservaId"] ?: body["reservaId"])?.toString().orEmpty()
+                        if (id.isBlank()) {
+                            _uiState.update { it.copy(isReservationLoading = false, snackbarMessage = "No se pudo confirmar la reserva. Verifica tu historial") }
+                        } else {
+                            _uiState.update { it.copy(
+                                isReservationLoading = false,
+                                hasConfirmedReservation = true, // AWS devolvió un ID: reserva registrada; el estado real se conserva en reservation.status
+                                reservation = it.reservation.copy(reservationId = id, status = reserva["estado"]?.toString()?.takeIf { estado -> estado.isNotBlank() } ?: "Pendiente de confirmación"),
+                                snackbarMessage = null // La confirmación visual se muestra en ReservationScreen
+                            ) }
+                        }
+                    }.onFailure { error ->
+                        _uiState.update { it.copy(isReservationLoading = false, snackbarMessage = "No se registró la reserva: ${error.message}") }
+                    }
+                }.onFailure { error ->
+                    _uiState.update { it.copy(isReservationLoading = false, snackbarMessage = "No se pudo consultar disponibilidad: ${error.message}") }
+                }
         }
     }
 
@@ -976,32 +932,7 @@ class RestaurantViewModel : ViewModel() {
     // ========================================================
 
     fun redeemPoints() {
-
-        _uiState.update { current ->
-
-            if (
-                current.userPoints >= 500
-            ) {
-
-                current.copy(
-
-                    userPoints =
-                        current.userPoints -
-                                500,
-
-                    snackbarMessage =
-                        "¡500 pts canjeados por Postre de Cortesía en tu próxima visita!"
-                )
-
-            } else {
-
-                current.copy(
-
-                    snackbarMessage =
-                        "Puntos insuficientes para canjear"
-                )
-            }
-        }
+        _uiState.update { it.copy(snackbarMessage = "El canje de puntos aún no está disponible") }
     }
 
 
@@ -1010,26 +941,9 @@ class RestaurantViewModel : ViewModel() {
     // ========================================================
 
     fun logout() {
-
-        _uiState.update { current ->
-
-            current.copy(
-
-                currentScreen =
-                    Screen.LOGIN,
-
-                previousScreen =
-                    Screen.HOME,
-
-                isDrawerOpen =
-                    false,
-
-                isQrModalOpen =
-                    false,
-
-                snackbarMessage =
-                    null
-            )
+        usuarioRepository.cerrarSesion()
+        _uiState.update {
+            UiState(currentScreen = Screen.LOGIN, snackbarMessage = null)
         }
     }
 

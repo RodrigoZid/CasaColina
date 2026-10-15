@@ -28,6 +28,7 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -47,7 +48,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
-import com.example.data.SampleData
 import com.example.model.Dish
 import com.example.model.MenuCategory
 import com.example.ui.theme.CriolloBackground
@@ -70,9 +70,15 @@ fun MenuScreen(
     onSelectCategory: (MenuCategory) -> Unit,
     onSelectDish: (Dish) -> Unit,
     onQuickAdd: (Dish) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    dishes: List<Dish> = emptyList(),
+    isLoading: Boolean = false,
+    errorMessage: String? = null,
+    onRetry: () -> Unit = {}
 ) {
-    val filteredDishes = SampleData.DISHES.filter { dish ->
+    val filteredDishes = dishes.filter { dish ->
+        // La disponibilidad proviene de CasaColina_Menu a través de Lambda.
+        if (!dish.available) return@filter false
         val matchesCategory = selectedCategory == MenuCategory.ALL || dish.category == selectedCategory
         val matchesQuery = searchQuery.isBlank() ||
                 dish.name.contains(searchQuery, ignoreCase = true) ||
@@ -163,7 +169,28 @@ fun MenuScreen(
             contentPadding = PaddingValues(top = 8.dp, bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            if (filteredDishes.isEmpty()) {
+            if (isLoading) {
+                item {
+                    Box(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 40.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        CircularProgressIndicator(color = CriolloPrimary)
+                    }
+                }
+            } else if (errorMessage != null) {
+                item {
+                    Column(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 32.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text("No se pudo cargar el menú", color = CriolloOnSurface)
+                        Text(errorMessage, color = CriolloOnSurfaceVariant)
+                        Spacer(modifier = Modifier.height(8.dp))
+                        OutlinedButton(onClick = onRetry) { Text("Reintentar") }
+                    }
+                }
+            } else if (filteredDishes.isEmpty()) {
                 item {
                     Box(
                         modifier = Modifier
@@ -304,6 +331,7 @@ fun MenuDishItemCard(
 
                         IconButton(
                             onClick = onQuickAdd,
+                            enabled = dish.available,
                             modifier = Modifier
                                 .size(30.dp)
                                 .background(CriolloPrimary, RoundedCornerShape(6.dp))

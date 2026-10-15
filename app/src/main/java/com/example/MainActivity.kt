@@ -21,6 +21,8 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
@@ -55,6 +57,14 @@ class MainActivity : ComponentActivity() {
 
                 val uiState by
                 viewModel.uiState.collectAsStateWithLifecycle()
+
+                // Navegar solo cuando el pedido fue confirmado por AWS.
+                LaunchedEffect(uiState.checkoutConfirmed) {
+                    if (uiState.checkoutConfirmed) {
+                        viewModel.consumeCheckoutConfirmation()
+                        viewModel.navigateTo(Screen.PROFILE)
+                    }
+                }
 
                 val snackbarHostState =
                     remember {
@@ -276,11 +286,10 @@ class MainActivity : ComponentActivity() {
                                     LoginScreen(
 
                                         onLoginSuccess = {
-
-                                            viewModel
-                                                .navigateTo(
-                                                    Screen.HOME
-                                                )
+                                            viewModel.navigateTo(Screen.HOME)
+                                            viewModel.cargarPerfilDesdeAws()
+                                            viewModel.cargarCarritoDesdeAws()
+                                            viewModel.cargarPedidosDesdeAws()
                                         }
                                     )
 
@@ -337,14 +346,21 @@ class MainActivity : ComponentActivity() {
                                                 .setQrModalOpen(
                                                     true
                                                 )
-                                        }
+                                        },
+                                        userName = uiState.userName.ifBlank { "Invitado" },
+                                        chefDishes = uiState.dishes.filter { it.isChefPick && it.available },
+                                        nextReservation = uiState.reservation.takeIf {
+                                            uiState.hasConfirmedReservation &&
+                                                    it.reservationId.isNotBlank() &&
+                                                    it.status.equals("confirmada", ignoreCase = true)
+                                        },
+                                        nextReservationDate = uiState.reservation.dateIso.takeIf { it.isNotBlank() },
+                                        isMenuLoading = uiState.isMenuLoading,
+                                        menuError = uiState.menuError,
+                                        onRetryMenu = { viewModel.cargarMenuDesdeAws() }
                                     )
 
-
-                                // =====================================
                                 // MENÚ
-                                // =====================================
-
                                 Screen.MENU ->
 
                                     MenuScreen(
@@ -390,14 +406,14 @@ class MainActivity : ComponentActivity() {
                                                 .quickAddToCart(
                                                     dish
                                                 )
-                                        }
+                                        },
+                                        dishes = uiState.dishes,
+                                        isLoading = uiState.isMenuLoading,
+                                        errorMessage = uiState.menuError,
+                                        onRetry = { viewModel.cargarMenuDesdeAws() }
                                     )
 
-
-                                // =====================================
                                 // DETALLE DEL PLATO
-                                // =====================================
-
                                 Screen.DISH_DETAIL ->
 
                                     DishDetailScreen(
@@ -473,10 +489,9 @@ class MainActivity : ComponentActivity() {
 
 
                                         onAddToCart = {
-
-                                            viewModel
-                                                .addDetailDishToCart()
-                                        }
+                                            viewModel.addDetailDishToCart()
+                                        },
+                                        isAvailable = uiState.selectedDish.available
                                     )
 
 
@@ -559,17 +574,20 @@ class MainActivity : ComponentActivity() {
 
                                         onReservationCompleted = {
 
-                                            viewModel.navigateTo(
-                                                Screen.PROFILE
-                                            )
+                                            if (uiState.hasConfirmedReservation &&
+                                                uiState.reservation.reservationId.isNotBlank()) {
+                                                viewModel.navigateTo(Screen.PROFILE)
+                                            }
+                                        },
+                                        isSubmitting = uiState.isReservationLoading,
+                                        reservationSaved = uiState.hasConfirmedReservation &&
+                                                uiState.reservation.reservationId.isNotBlank(),
+                                        onSelectIsoDate = { dateIso ->
+                                            viewModel.selectReservationFullDate(dateIso)
                                         }
                                     )
 
-
-                                // =====================================
                                 // CARRITO
-                                // =====================================
-
                                 Screen.CART ->
 
                                     CartScreen(
@@ -634,8 +652,7 @@ class MainActivity : ComponentActivity() {
                                              * debe guardar el pedido
                                              * dentro de orderHistory.
                                              */
-                                            viewModel
-                                                .processCheckout()
+                                            viewModel.processCheckout()
                                         },
 
 
@@ -663,9 +680,7 @@ class MainActivity : ComponentActivity() {
                                              * "Pago completado",
                                              * va al perfil.
                                              */
-                                            viewModel.navigateTo(
-                                                Screen.PROFILE
-                                            )
+                                            // La navegación se realiza al confirmarse el pedido en AWS.
                                         }
                                     )
 
@@ -759,21 +774,25 @@ class MainActivity : ComponentActivity() {
                                                     false
                                                 )
 
-                                            viewModel
-                                                .navigateTo(
-                                                    Screen.LOGIN
-                                                )
-                                        }
+                                            viewModel.logout()
+                                        },
+                                        userName = uiState.userName,
+                                        userEmail = uiState.userEmail,
+                                        hasConfirmedReservation = uiState.hasConfirmedReservation &&
+                                                uiState.reservation.reservationId.isNotBlank()
                                     )
                             }
                         }
 
-
-                        // =============================================
                         // MODAL QR
                         // =============================================
 
                         if (
+                            uiState.hasConfirmedReservation &&
+                            uiState.reservation.reservationId.isNotBlank() &&
+                            uiState.reservation.status.trim().uppercase() !in setOf(
+                                "CANCELADA", "CANCELADO", "CANCELLED", "RECHAZADA", "RECHAZADO"
+                            ) &&
                             uiState.isQrModalOpen &&
                             uiState.currentScreen !=
                             Screen.LOGIN
@@ -791,7 +810,7 @@ class MainActivity : ComponentActivity() {
 
 
                                 guestName =
-                                    "Rodrigo Torres",
+                                    uiState.userName.ifBlank { "Invitado" },
 
 
                                 guestsCount =

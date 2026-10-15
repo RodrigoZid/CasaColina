@@ -27,6 +27,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CheckboxDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Divider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -73,11 +74,16 @@ fun DishDetailScreen(
     onToggleFavorite: () -> Unit,
     onBack: () -> Unit,
     onAddToCart: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    isAvailable: Boolean = dish.available,
+    isAddingToCart: Boolean = false,
+    cartError: String? = null,
+    onRetryAddToCart: (() -> Unit)? = null
 ) {
-    val extrasSum = selectedExtras.values.sum()
-    val unitPrice = dish.price + extrasSum
-    val finalTotal = unitPrice * quantity
+    val safeQuantity = quantity.coerceAtLeast(1)
+    val canAddToCart = isAvailable && !isAddingToCart && quantity >= 1
+    // AWS registra el precio base del plato; los extras aún no forman parte del contrato de Carrito.
+    val finalTotal = dish.price * safeQuantity
 
     val availableSides = listOf(
         Pair("Papas nativas extras crocantes", 12.00),
@@ -380,6 +386,13 @@ fun DishDetailScreen(
 
                 Spacer(modifier = Modifier.height(10.dp))
 
+                Text(
+                    text = "Guarniciones sujetas a confirmación; no se incluyen en el total registrado en AWS.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = CriolloOnSurfaceVariant,
+                    modifier = Modifier.padding(bottom = 8.dp)
+                )
+
                 availableSides.forEach { (sideName, sidePrice) ->
                     val isChecked = selectedExtras.containsKey(sideName)
                     Row(
@@ -470,6 +483,7 @@ fun DishDetailScreen(
                 // Add to Cart Button
                 Button(
                     onClick = onAddToCart,
+                    enabled = canAddToCart,
                     shape = RoundedCornerShape(10.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = CriolloPrimaryContainer),
                     modifier = Modifier
@@ -482,8 +496,22 @@ fun DishDetailScreen(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("Agregar al Carrito", fontWeight = FontWeight.Bold, color = CriolloOnPrimary)
+                        if (isAddingToCart) {
+                            CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = CriolloOnPrimary)
+                        } else {
+                            Text(if (isAvailable) "Agregar al Carrito" else "No disponible", fontWeight = FontWeight.Bold, color = CriolloOnPrimary)
+                        }
                         Text("S/ ${"%.2f".format(finalTotal)}", fontWeight = FontWeight.Bold, color = CriolloOnPrimary)
+                    }
+                }
+            }
+            if (!cartError.isNullOrBlank()) {
+                Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+                    Text(text = cartError, color = CriolloError, style = MaterialTheme.typography.bodySmall)
+                    if (onRetryAddToCart != null && canAddToCart) {
+                        Button(onClick = onRetryAddToCart, colors = ButtonDefaults.buttonColors(containerColor = CriolloPrimaryContainer)) {
+                            Text("Reintentar", color = CriolloOnPrimary)
+                        }
                     }
                 }
             }
